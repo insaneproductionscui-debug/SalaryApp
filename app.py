@@ -4,26 +4,25 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 import io
+import os
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-# This must match the exact header name you typed in Excel
+# The file must be named EXACTLY this in your GitHub repo
+CSV_FILE_NAME = 'salary_data.csv' 
 PASSWORD_COL_NAME = 'Password' 
 
 # ==========================================
 # 2. PDF GENERATION ENGINE
 # ==========================================
 def generate_pdf(row):
-    """Creates a PDF file in memory for a specific rider."""
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     
-    # --- Helper to safely get text ---
     def get_txt(col_name):
         return str(row.get(col_name, '')).replace('nan', '')
 
-    # --- Helper to safely get numbers ---
     def get_num(col_name):
         try:
             val = row.get(col_name, 0)
@@ -38,11 +37,9 @@ def generate_pdf(row):
     c.setFont("Helvetica", 10)
     c.drawString(1 * inch, 10 * inch, f"City: {get_txt('City')}")
     c.drawString(4.5 * inch, 10 * inch, f"Rider ID: {get_txt('Rider ID')}")
-    
     c.drawString(1 * inch, 9.75 * inch, f"Name: {get_txt('Rider Name')}")
     c.drawString(4.5 * inch, 9.75 * inch, f"Bike No: {get_txt('Nov-25 Bike')}")
-    
-    c.drawString(1 * inch, 9.5 * inch, "Period: Nov-2025") # Update this manually every month if needed
+    c.drawString(1 * inch, 9.5 * inch, "Period: Nov-2025") 
     c.drawString(4.5 * inch, 9.5 * inch, "Aggregator: Talabat")
     
     c.line(0.5 * inch, 9.2 * inch, 7.5 * inch, 9.2 * inch)
@@ -55,8 +52,7 @@ def generate_pdf(row):
     y -= 0.3 * inch
     c.setFont("Helvetica", 10)
 
-    # --- Mapping Data ---
-    # Format: ("Label on PDF", "Exact Column Name in Excel")
+    # Earnings Map
     earnings = [
         ("Pickups Payment", "Rider Pickup Payment"),
         ("Dropoffs Payment", "Rider Dropoff Payment"),
@@ -65,6 +61,7 @@ def generate_pdf(row):
         ("Returns (LC)", "Deliveries - Return (LC)")
     ]
 
+    # Deductions Map
     deductions = [
         ("COD Deficit", "COD Deficit"),
         ("Clawback", "Clawback Deduction"),
@@ -101,12 +98,11 @@ def generate_pdf(row):
             d_y -= 0.2 * inch
 
     # --- Totals ---
-    # We find the lowest point used by either column to draw the line
     final_y = min(y, d_y) - 0.5 * inch
     c.line(0.5 * inch, final_y + 0.15 * inch, 7.5 * inch, final_y + 0.15 * inch)
     
-    gross = get_num('Gross salary') # Adjusted logic for whitespace below
-    total_ded = get_num("Total Deduction'") # Handling the quote in your header
+    gross = get_num('Gross salary') 
+    total_ded = get_num("Total Deduction'") 
     net = get_num('Net Riders Salaries')
 
     c.setFont("Helvetica-Bold", 10)
@@ -131,62 +127,54 @@ def generate_pdf(row):
 st.set_page_config(page_title="Rider Salary Portal", layout="centered")
 
 st.title("📦 Rider Salary Portal")
-st.markdown("Enter your Rider ID and Password to download your slip.")
 
-# --- Admin Section (Hidden in Sidebar) ---
-with st.sidebar:
-    st.header("Admin Panel")
-    uploaded_file = st.file_uploader("Upload Salary CSV", type=['csv'])
-
-# --- Main Logic ---
-if uploaded_file is not None:
+# Check if the file exists in the repo
+if os.path.exists(CSV_FILE_NAME):
     try:
-        # Read CSV. Header is on Row 5 (index 4) based on your file structure
-        df = pd.read_csv(uploaded_file, header=4)
+        # Read CSV directly from the server (GitHub repo)
+        df = pd.read_csv(CSV_FILE_NAME, header=4)
         
-        # Clean Header Names (Remove spaces)
+        # Clean Data
         df.columns = df.columns.str.strip()
-        
-        # Ensure IDs are strings
         df['Rider ID'] = df['Rider ID'].astype(str).str.replace('.0', '')
         
-        # Check if Password column exists
+        # Security Check
         if PASSWORD_COL_NAME not in df.columns:
-            st.error(f"❌ Error: Your CSV is missing the '{PASSWORD_COL_NAME}' column.")
+            st.error(f"⚠️ System Config Error: Column '{PASSWORD_COL_NAME}' not found in data.")
         else:
             df[PASSWORD_COL_NAME] = df[PASSWORD_COL_NAME].astype(str).str.replace('.0', '')
 
             # --- Login Form ---
+            st.markdown("##### 🔒 Login to download your slip")
             with st.form("login_form"):
                 col1, col2 = st.columns(2)
                 uid = col1.text_input("Rider ID")
                 pwd = col2.text_input("Password", type="password")
-                submitted = st.form_submit_button("Search")
+                submitted = st.form_submit_button("Get Payslip")
 
             if submitted:
                 # Find the rider
                 user = df[(df['Rider ID'] == uid) & (df[PASSWORD_COL_NAME] == pwd)]
                 
                 if not user.empty:
-                    # Rider Found
                     rider_data = user.iloc[0]
-                    st.success(f"Hello, {rider_data['Rider Name']}!")
+                    st.success(f"Verified: {rider_data['Rider Name']}")
                     
                     # Generate PDF
                     pdf_data = generate_pdf(rider_data)
                     
                     # Show Download Button
                     st.download_button(
-                        label="📄 Download Salary Slip (PDF)",
+                        label="📄 Download PDF Slip",
                         data=pdf_data,
                         file_name=f"Salary_{uid}.pdf",
                         mime="application/pdf"
                     )
                 else:
-                    if uid or pwd:
-                        st.error("❌ Invalid ID or Password.")
+                    st.error("❌ Access Denied: Incorrect ID or Password.")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"System Error: {e}")
 else:
-    st.info("System is offline. Waiting for Admin to upload data.")
+    # This shows if you forgot to upload the CSV to GitHub
+    st.warning("⚠️ System Maintenance: Salary data has not been uploaded yet.")
